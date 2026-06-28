@@ -88,7 +88,7 @@ export async function buildServer(ctx: BridgeContext): Promise<McpServer> {
   const { McpServer } = await loadSdk();
   const server: McpServer = new McpServer({
     name: "nest-bridge",
-    version: "1.0.3",
+    version: "1.0.4",
   });
 
   // Descriptions are registered ONCE at startup, before the background unlock
@@ -428,6 +428,211 @@ export async function buildServer(ctx: BridgeContext): Promise<McpServer> {
       tags: z.array(z.string()).optional(),
     },
     "Update an event."
+  );
+
+  // ---- MERCHANTS ----------------------------------------------------------
+  // Shared field shape (loose strings/enums, mirroring the person/company tools)
+  // matching lib/crmValidation MerchantCreate/PatchSchema. notes + the contact/
+  // owner free-text fields are encrypted; the rest is cleartext metadata.
+  const merchantBase: Record<string, z.ZodTypeAny> = {
+    zone: z.string().optional(),
+    address: z.string().optional(),
+    type: z
+      .string()
+      .optional()
+      .describe("fnb_cafe|fnb_restaurant|fnb_bar|retail|hotel|coworking|wellness|other"),
+    paymentRails: z.array(z.string()).optional(),
+    foreignCustomerMix: z.string().optional().describe("low|medium|high|unknown"),
+    visitStatus: z
+      .string()
+      .optional()
+      .describe("not_visited|visited_cold|visited_pitched|signage_placed|activated|declined"),
+    lastVisit: z.string().optional().describe("ISO date"),
+    preloadedCardGiven: z.boolean().optional(),
+    preloadedCardAmount: z.number().optional(),
+    contactPerson: z.string().optional(),
+    contactInfo: z.string().optional(),
+    ambassador: z.string().optional().describe("Person _id"),
+    notes: z.string().optional(),
+    tags: z.array(z.string()).optional(),
+    source: z.string().optional(),
+    qrInterested: z.string().optional().describe("not_offered|yes|maybe|no"),
+    qrDeliveryStatus: z.string().optional().describe("not_offered|pending|shipped|delivered"),
+    qrShippingContact: z.string().optional(),
+    voiceMemoUrl: z.string().optional(),
+    voiceMemoPath: z.string().optional(),
+    intakeSubmittedAt: z.string().optional().describe("ISO date"),
+    foreignPaymentIssues: z.string().optional().describe("unknown|yes|sometimes|no"),
+    ownerName: z.string().optional(),
+    paymentRanking: z
+      .array(z.object({ rail: z.string(), rank: z.number().int() }))
+      .optional(),
+    promptpayReasons: z.array(z.string()).optional(),
+    promptpayReasonOther: z.string().optional(),
+    usdBalanceInterest: z.string().optional(),
+    dailyVolume: z.string().optional(),
+    foreignCustomerRegions: z.array(z.string()).optional(),
+    cryptoFamiliarity: z.string().optional(),
+    customerCryptoAskFrequency: z.string().optional(),
+    bestContactTime: z.array(z.string()).optional(),
+    yearsInBusiness: z.string().optional(),
+    topPaymentMethod: z.string().optional(),
+    ownerOrigin: z.string().optional(),
+    foreignPaymentIssueTypes: z.array(z.string()).optional(),
+    customerForeignPayAsk: z.string().optional(),
+    crossBorderPayOut: z.string().optional(),
+  };
+  registerList(
+    "list_merchants",
+    "merchant",
+    "List merchants (cafe/shop field visits). Filter by status."
+  );
+  registerGet("get_merchant", "merchant", "Get one merchant by id, with notes.");
+  registerSearch(
+    "search_merchants",
+    "merchant",
+    ["name", "city", "notes"],
+    "Search merchants by name/city/notes."
+  );
+  registerCreate(
+    "create_merchant",
+    "merchant",
+    {
+      name: z.string().describe("Shop name"),
+      city: z.string().describe("City"),
+      ...merchantBase,
+    },
+    "Create a merchant."
+  );
+  registerUpdate(
+    "update_merchant",
+    "merchant",
+    {
+      name: z.string().optional(),
+      city: z.string().optional(),
+      ...merchantBase,
+    },
+    "Update a merchant (only the fields you pass change)."
+  );
+
+  // ---- ROUTES -------------------------------------------------------------
+  // Ordered walking/meeting routes. No encrypted fields today (stop notes live
+  // per-stop in cleartext); mirror lib/crmValidation RouteCreate/PatchSchema.
+  const routeStop = z.object({
+    merchantId: z.string().optional().describe("Merchant _id"),
+    name: z.string().optional(),
+    address: z.string().optional(),
+    googleMapsUrl: z.string().optional(),
+    order: z.number().int(),
+    walkingMinFromPrev: z.number().optional(),
+    notes: z.string().optional(),
+    visited: z.boolean().optional(),
+    visitedAt: z.string().optional().describe("ISO date"),
+  });
+  const routeBase: Record<string, z.ZodTypeAny> = {
+    zone: z.string().optional(),
+    session: z.string().optional(),
+    date: z.string().optional().describe("ISO date"),
+    ownerPersonId: z.string().optional().describe("Person _id"),
+    status: z.string().optional().describe("planned|in_progress|complete"),
+    stops: z.array(routeStop).optional(),
+    isPublic: z.boolean().optional(),
+    tags: z.array(z.string()).optional(),
+    source: z.string().optional(),
+  };
+  registerList("list_routes", "route", "List routes. Filter by status.");
+  registerGet("get_route", "route", "Get one route by id, with its stops.");
+  registerSearch(
+    "search_routes",
+    "route",
+    ["name", "city"],
+    "Search routes by name/city."
+  );
+  registerCreate(
+    "create_route",
+    "route",
+    {
+      name: z.string().describe("Route name"),
+      city: z.string().describe("City"),
+      ...routeBase,
+    },
+    "Create a route."
+  );
+  registerUpdate(
+    "update_route",
+    "route",
+    {
+      name: z.string().optional(),
+      city: z.string().optional(),
+      ...routeBase,
+    },
+    "Update a route (only the fields you pass change)."
+  );
+
+  // ---- SURVEYS (read-only) ------------------------------------------------
+  // Public research surveys (nomad travelers + company founders). READ-ONLY:
+  // submissions arrive via the public web forms, not the AI. These collections
+  // are stored CLEARTEXT server-side (operator-only GET), so the bridge serves
+  // them as a straight pass-through — no decrypt, no encrypted-vs-clear split.
+  function registerSurveyList(
+    name: string,
+    coll: "nomad" | "founder",
+    desc: string
+  ) {
+    server.registerTool(
+      name,
+      {
+        description: desc,
+        inputSchema: { limit: z.number().int().min(1).max(1000).optional() },
+      },
+      async (args: { limit?: number }) => {
+        try {
+          const rows = await ctx.data.listReadonly(coll, args);
+          return jsonResult({ count: rows.length, items: rows });
+        } catch (e) {
+          return errResult(e);
+        }
+      }
+    );
+  }
+  function registerSurveyGet(
+    name: string,
+    coll: "nomad" | "founder",
+    desc: string
+  ) {
+    server.registerTool(
+      name,
+      { description: desc, inputSchema: { id: z.string().describe("The record's _id") } },
+      async (args: { id: string }) => {
+        try {
+          const row = await ctx.data.getReadonly(coll, args.id);
+          if (!row) return errResult(new Error("not_found"));
+          return jsonResult(row);
+        } catch (e) {
+          return errResult(e);
+        }
+      }
+    );
+  }
+  registerSurveyList(
+    "list_nomad_responses",
+    "nomad",
+    "List nomad/traveler payment-research survey responses (newest first), with contact + free-text answer."
+  );
+  registerSurveyGet(
+    "get_nomad_response",
+    "nomad",
+    "Get one nomad survey response by id, with contact + free-text answer."
+  );
+  registerSurveyList(
+    "list_founder_leads",
+    "founder",
+    "List founder/company payroll-research survey leads (newest first), with contact + free-text answer."
+  );
+  registerSurveyGet(
+    "get_founder_lead",
+    "founder",
+    "Get one founder survey lead by id, with contact + free-text answer."
   );
 
   // ---- DIGEST -------------------------------------------------------------

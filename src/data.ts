@@ -28,6 +28,17 @@ const PATHS: Record<CrmModel, string> = {
   route: "/api/routes",
 };
 
+// Read-only survey collections (Nomad / Founder research surveys). These are
+// NOT CRM models: they carry no `enc` blob (the server stores them cleartext and
+// gates GET operator-only), so the bridge serves them as a straight pass-through
+// with no decrypt step, and exposes ONLY list/get. There is no per-id REST route
+// for them, so getReadonly filters the list client-side by _id.
+export type ReadonlyCollection = "nomad" | "founder";
+const READONLY_PATHS: Record<ReadonlyCollection, string> = {
+  nomad: "/api/nomad",
+  founder: "/api/founder",
+};
+
 export interface Vault {
   encrypted: boolean;
   dek: Uint8Array | null;
@@ -183,5 +194,32 @@ export class DataLayer {
   async digest(): Promise<unknown> {
     await this.ensureUnlocked();
     return this.client.get("/api/digest");
+  }
+
+  // --- READ-ONLY SURVEYS (cleartext pass-through) --------------------------
+
+  // List a survey collection. No decrypt: these docs are always cleartext.
+  async listReadonly(
+    coll: ReadonlyCollection,
+    query: Record<string, string | number | undefined> = {}
+  ): Promise<Record<string, unknown>[]> {
+    await this.ensureUnlocked();
+    const qs = Object.entries(query)
+      .filter(([, v]) => v !== undefined && v !== "")
+      .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`)
+      .join("&");
+    const base = READONLY_PATHS[coll];
+    const path = qs ? `${base}?${qs}` : base;
+    return (await this.client.get<Record<string, unknown>[]>(path)) ?? [];
+  }
+
+  // Get one survey row by _id. There is no per-id REST route for surveys, so we
+  // fetch the (operator-scoped) list and find the row locally.
+  async getReadonly(
+    coll: ReadonlyCollection,
+    id: string
+  ): Promise<Record<string, unknown> | null> {
+    const rows = await this.listReadonly(coll);
+    return rows.find((r) => String(r._id) === id) ?? null;
   }
 }

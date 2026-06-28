@@ -132,6 +132,15 @@ const route: ModelFieldSplit = {
   blankWith: {},
 };
 
+// NOMAD RESPONSE / FOUNDER LEAD ----------------------------------------------
+// NOTE: these public research surveys are deliberately NOT in CONTENT_SCHEMA.
+// Their Mongoose models carry no `enc` scaffold; the server stores them
+// CLEARTEXT and serves them operator-only (GET is gated, POST is public). The
+// bridge therefore exposes them READ-ONLY as a straight pass-through (see
+// DataLayer.listReadonly / getReadonly) and never routes them through the
+// encrypt/decrypt path. Keeping them out of CONTENT_SCHEMA is what makes this
+// schema byte-identical with the Nest web app's contentSchema.ts.
+
 export const CONTENT_SCHEMA: Record<CrmModel, ModelFieldSplit> = {
   person,
   task,
