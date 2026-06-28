@@ -52,41 +52,72 @@ async function main() {
 
   const client = new NestClient({ apiUrl, apiKey });
 
-  // 1) Fetch the password-wrapped DEK blob + the account's encryption state.
-  log(`Connecting to ${apiUrl} …`);
-  let wrapInfo: Awaited<ReturnType<NestClient["getBridgeWrap"]>>;
-  try {
-    wrapInfo = await client.getBridgeWrap();
-  } catch (e) {
-    log(
-      "Failed to reach Nest or authenticate the API key:",
-      e instanceof Error ? e.message : String(e)
-    );
-    process.exit(1);
-  }
+  // The vault is mutated IN PLACE once the background unlock resolves; the
+  // DataLayer holds this same reference, so a tool call that awaits the unlock
+  // gate sees the populated DEK. canWrite/encrypted are likewise filled in by
+  // the background unlock and read lazily by the write gate.
+  const vault: Vault = { encrypted: false, dek: null, dekVersion: 1 };
+  let canWrite = false;
+  let encrypted = false;
+  let unlocked = false;
 
-  const encrypted = wrapInfo.encState === "encrypted";
-  let vault: Vault = { encrypted, dek: null, dekVersion: 1 };
+  // ---- BACKGROUND UNLOCK ----------------------------------------------------
+  // We do NOT block the MCP handshake on this. It runs right after we connect
+  // the stdio transport (kicked off below). Tool calls await `unlockGate`; a
+  // rejection carries a clean, human-readable reason that surfaces to Claude.
+  let unlockPromise: Promise<void> | null = null;
 
-  if (!encrypted) {
+  async function doUnlock(): Promise<void> {
+    // 1) Fetch the password-wrapped DEK blob + the account's encryption state.
+    log(`Connecting to ${apiUrl} …`);
+    let wrapInfo: Awaited<ReturnType<NestClient["getBridgeWrap"]>>;
+    try {
+      wrapInfo = await client.getBridgeWrap();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      log("Failed to reach Nest or authenticate the API key:", msg);
+      throw new Error(
+        `Could not unlock: failed to reach Nest or the API key is invalid (${msg}).`
+      );
+    }
+
+    encrypted = wrapInfo.encState === "encrypted";
+    vault.encrypted = encrypted;
+
+    // Determine write capability from the key's scopes (the server still
+    // enforces authoritatively per-route).
+    const scopes = wrapInfo.scopes ?? [];
+    canWrite = scopes.some((s) => WRITE_SCOPES.has(s));
+    if (process.env.NEST_READ_ONLY === "1") canWrite = false;
     log(
-      "Account is NOT end-to-end encrypted — running in pass-through mode (no key needed)."
+      `Key scopes: ${scopes.join(", ") || "(unknown)"} → ${canWrite ? "read+write" : "read-only"}.`
     );
-  } else if (!wrapInfo.hasPasswordWrap || !wrapInfo.wrap) {
-    log(
-      "Account is encrypted but has NO password unlock method. The bridge unlocks by password; add a password method in Nest → Settings → Encryption, then retry. Continuing LOCKED (content will be blank)."
-    );
-  } else {
+
+    if (!encrypted) {
+      log(
+        "Account is NOT end-to-end encrypted — running in pass-through mode (no key needed)."
+      );
+      unlocked = true;
+      return;
+    }
+
+    if (!wrapInfo.hasPasswordWrap || !wrapInfo.wrap) {
+      log(
+        "Account is encrypted but has NO password unlock method. The bridge unlocks by password; add a password method in Nest → Settings → Encryption, then retry. Continuing LOCKED (content will be blank)."
+      );
+      throw new Error(
+        "Could not unlock: this encrypted account has no password unlock method. Add a password method in Nest → Settings → Encryption."
+      );
+    }
+
     // 2) Get the password. Priority: env/connector config (NEST_PASSWORD) for
     // non-interactive launches (Claude Desktop / OpenAI inject user_config as
     // env), else a hidden TTY prompt for manual terminal runs. When launched
-    // WITHOUT a real interactive terminal AND without NEST_PASSWORD (e.g. a
-    // Claude Desktop connector with the field left blank), DO NOT try to read
-    // the MCP stdio pipe — continue locked with a clear message instead.
+    // WITHOUT a real interactive terminal AND without NEST_PASSWORD, do NOT try
+    // to read the MCP stdio pipe — fail the unlock with a clear message.
     let password = process.env.NEST_PASSWORD || "";
     if (!password) {
-      const interactive = hasInteractiveTty();
-      if (interactive) {
+      if (hasInteractiveTty()) {
         password = await promptHidden("Nest encryption password: ");
       } else {
         log(
@@ -95,49 +126,62 @@ async function main() {
       }
     }
     if (!password) {
-      log("No password provided — continuing LOCKED (content will be blank).");
-    } else {
-      // 3) Derive the password KEK (Argon2id, matches the browser) → unwrap DEK.
-      log("Deriving key (Argon2id) and unwrapping the DEK locally …");
-      try {
-        const { dek, dekVersion } = await unlockDekWithPassword(
-          password,
-          wrapInfo.wrap
-        );
-        vault = { encrypted: true, dek, dekVersion };
-        log("Unlocked. The DEK is held in memory only; the server never sees it.");
-      } catch (e) {
-        log(
-          "Unlock FAILED (wrong password or wrap mismatch):",
-          e instanceof Error ? e.message : String(e),
-          "— continuing LOCKED."
-        );
-      }
+      throw new Error(
+        "Could not unlock: no password provided. Set NEST_PASSWORD in your connector config, or run the bridge in a terminal to be prompted."
+      );
     }
-    // Best-effort scrub of the password reference.
-    password = "";
+
+    // 3) Derive the password KEK (Argon2id, matches the browser) → unwrap DEK.
+    log("Deriving key (Argon2id) and unwrapping the DEK locally …");
+    try {
+      const { dek, dekVersion } = await unlockDekWithPassword(
+        password,
+        wrapInfo.wrap
+      );
+      vault.dek = dek;
+      vault.dekVersion = dekVersion;
+      unlocked = true;
+      log("Unlocked. The DEK is held in memory only; the server never sees it.");
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      log("Unlock FAILED (wrong password or wrap mismatch):", msg);
+      throw new Error(
+        "Could not unlock: wrong password (the wrapped key failed to decrypt)."
+      );
+    } finally {
+      // Best-effort scrub of the password reference.
+      password = "";
+    }
   }
 
-  // Determine write capability from the key's scopes (the server still enforces
-  // authoritatively per-route). The bridge-wrap endpoint reports the key's
-  // scopes; a read-only key gets a clean "read-only" message instead of a 403.
-  const scopes = wrapInfo.scopes ?? [];
-  let canWrite = scopes.some((s) => WRITE_SCOPES.has(s));
-  if (process.env.NEST_READ_ONLY === "1") canWrite = false;
-  log(
-    `Key scopes: ${scopes.join(", ") || "(unknown)"} → ${canWrite ? "read+write" : "read-only"}.`
-  );
+  // Idempotent gate: start the unlock once, await the same promise everywhere.
+  // A rejection is cached so every subsequent tool call sees the same clean
+  // error (we don't retry a wrong password on each call).
+  function ensureUnlocked(): Promise<void> {
+    if (!unlockPromise) unlockPromise = doUnlock();
+    return unlockPromise;
+  }
 
-  const data = new DataLayer(client, vault);
+  const data = new DataLayer(client, vault, ensureUnlocked);
   const server = await buildServer({
     data,
-    canWrite,
-    encrypted,
-    unlocked: vault.dek !== null,
+    ensureUnlocked,
+    getStatus: () => ({ canWrite, encrypted, unlocked }),
   });
 
+  // ---- CONNECT FIRST (instant handshake) ------------------------------------
+  // Connect the stdio transport BEFORE unlocking so the client's MCP
+  // initialize/connect probe completes immediately (no Argon2id/fetch on the
+  // handshake path). tools/list works right away.
   await runStdio(server);
   log("MCP server ready (stdio). Connect Claude to this process.");
+
+  // ---- THEN unlock in the background ----------------------------------------
+  // Kick it off now so the DEK is usually ready by the first tool call; if a
+  // tool is called sooner, DataLayer.ensureUnlocked() awaits this same promise.
+  // Swallow the rejection here (it's surfaced per tool call); never crash the
+  // process — tools/list must keep working even if unlock fails.
+  ensureUnlocked().catch(() => {});
 }
 
 main().catch((e) => {

@@ -34,8 +34,20 @@ export interface Vault {
   dekVersion: number;
 }
 
+// A gate the DataLayer awaits before every operation. It resolves once the
+// background unlock has finished (or determined no unlock is needed). If the
+// unlock FAILED (wrong password / invalid key / endpoint error) it rejects
+// with a clear, human-readable Error so the tool call surfaces a clean message.
+// Until it settles, calls simply await it — so a tool invoked before unlock
+// completes waits for the in-flight unlock, then proceeds.
+export type UnlockGate = () => Promise<void>;
+
 export class DataLayer {
-  constructor(private client: NestClient, private vault: Vault) {}
+  constructor(
+    private client: NestClient,
+    private vault: Vault,
+    private ensureUnlocked: UnlockGate = async () => {}
+  ) {}
 
   private path(model: CrmModel): string {
     return PATHS[model];
@@ -47,6 +59,7 @@ export class DataLayer {
     model: CrmModel,
     query: Record<string, string | number | undefined> = {}
   ): Promise<Record<string, unknown>[]> {
+    await this.ensureUnlocked();
     const qs = Object.entries(query)
       .filter(([, v]) => v !== undefined && v !== "")
       .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`)
@@ -60,6 +73,7 @@ export class DataLayer {
     model: CrmModel,
     id: string
   ): Promise<Record<string, unknown> | null> {
+    await this.ensureUnlocked();
     const row = await this.client.get<Record<string, unknown> | null>(
       `${this.path(model)}/${id}`
     );
@@ -95,6 +109,7 @@ export class DataLayer {
     model: CrmModel,
     fields: Record<string, unknown>
   ): Promise<Record<string, unknown> | null> {
+    await this.ensureUnlocked();
     const payload = await buildWritePayload(
       model,
       {
@@ -122,6 +137,7 @@ export class DataLayer {
     id: string,
     changes: Record<string, unknown>
   ): Promise<Record<string, unknown> | null> {
+    await this.ensureUnlocked();
     let payload: Record<string, unknown>;
     if (this.vault.encrypted && this.vault.dek) {
       const current = await this.get(model, id); // decrypted
@@ -155,6 +171,7 @@ export class DataLayer {
 
   // Convenience: mark a task done (metadata-only write, never touches content).
   async completeTask(id: string): Promise<Record<string, unknown> | null> {
+    await this.ensureUnlocked();
     const updated = await this.client.patch<Record<string, unknown> | null>(
       `${this.path("task")}/${id}`,
       { status: "done" }
@@ -164,6 +181,7 @@ export class DataLayer {
   }
 
   async digest(): Promise<unknown> {
+    await this.ensureUnlocked();
     return this.client.get("/api/digest");
   }
 }

@@ -33,11 +33,24 @@ async function loadSdk(): Promise<{
   };
 }
 
-export interface BridgeContext {
-  data: DataLayer;
+// The server's view of unlock status. Because the unlock now runs in the
+// BACKGROUND (so the MCP handshake returns instantly), none of these fields are
+// known at buildServer() time — they are read LAZILY at tool-call time via
+// getStatus(), after the in-flight unlock has settled.
+export interface BridgeStatus {
   canWrite: boolean; // the key has crm:write / tasks:write
   encrypted: boolean;
   unlocked: boolean; // a DEK is held (encrypted accounts only)
+}
+
+export interface BridgeContext {
+  data: DataLayer;
+  // Block until the background unlock finishes; throws a clean Error if it
+  // failed (wrong password / invalid key / endpoint error). Write tools call
+  // this (via DataLayer) before checking canWrite, so scopes are known.
+  ensureUnlocked: () => Promise<void>;
+  // Current unlock status, read lazily (post-unlock) for the write gate.
+  getStatus: () => BridgeStatus;
 }
 
 function jsonResult(value: unknown) {
@@ -75,14 +88,28 @@ export async function buildServer(ctx: BridgeContext): Promise<McpServer> {
   const { McpServer } = await loadSdk();
   const server: McpServer = new McpServer({
     name: "nest-bridge",
-    version: "1.0.0",
+    version: "1.0.2",
   });
 
-  const encNote = ctx.encrypted
-    ? ctx.unlocked
-      ? " This account is end-to-end encrypted; the bridge decrypts/encrypts locally so you see and write real content."
-      : " WARNING: this encrypted account is LOCKED (no key) — content fields will be blank."
-    : "";
+  // Descriptions are registered ONCE at startup, before the background unlock
+  // finishes — so this note can't depend on the (not-yet-known) unlock state.
+  // Tool calls themselves await the unlock; if it's an encrypted account the
+  // bridge decrypts locally once unlocked. Keep the note generic + honest.
+  const encNote =
+    " If your Nest account is end-to-end encrypted, the bridge unlocks with your" +
+    " password in the background and decrypts/encrypts locally so you see and" +
+    " write real content; the server only ever sees ciphertext.";
+
+  // Shared write-gate: tool calls go through DataLayer (which awaits the unlock)
+  // for the heavy lifting, but the canWrite scope is only known post-unlock, so
+  // write tools ensure the unlock settled, then check the scope for a clean
+  // "read-only" message before attempting the write.
+  async function ensureWritable(): Promise<void> {
+    await ctx.ensureUnlocked();
+    if (!ctx.getStatus().canWrite) {
+      throw new Error("This API key is read-only (no write scope).");
+    }
+  }
 
   // ---- generic registrars -------------------------------------------------
 
@@ -176,12 +203,8 @@ export async function buildServer(ctx: BridgeContext): Promise<McpServer> {
       name,
       { description: desc + encNote, inputSchema: shape },
       async (args: Record<string, unknown>) => {
-        if (!ctx.canWrite) {
-          return errResult(
-            new Error("This API key is read-only (no write scope).")
-          );
-        }
         try {
+          await ensureWritable();
           const clean = Object.fromEntries(
             Object.entries(args).filter(([, v]) => v !== undefined)
           );
@@ -207,12 +230,8 @@ export async function buildServer(ctx: BridgeContext): Promise<McpServer> {
         inputSchema: { id: z.string().describe("The record's _id"), ...shape },
       },
       async (args: Record<string, unknown>) => {
-        if (!ctx.canWrite) {
-          return errResult(
-            new Error("This API key is read-only (no write scope).")
-          );
-        }
         try {
+          await ensureWritable();
           const { id, ...rest } = args as { id: string } & Record<string, unknown>;
           const changes = Object.fromEntries(
             Object.entries(rest).filter(([, v]) => v !== undefined)
@@ -358,10 +377,8 @@ export async function buildServer(ctx: BridgeContext): Promise<McpServer> {
       inputSchema: { id: z.string().describe("The task _id") },
     },
     async (args: { id: string }) => {
-      if (!ctx.canWrite) {
-        return errResult(new Error("This API key is read-only (no write scope)."));
-      }
       try {
+        await ensureWritable();
         return jsonResult(await ctx.data.completeTask(args.id));
       } catch (e) {
         return errResult(e);
