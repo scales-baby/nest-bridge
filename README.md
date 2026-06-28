@@ -37,12 +37,12 @@ Copy the key when it is shown (it appears once). It looks like `nest_ab12cd34_..
 NEST_API_KEY="nest_ab12cd34_..." \
 NEST_PASSWORD="your-encryption-password" \
 NEST_NON_INTERACTIVE=1 \
-npx @scales-baby/nest-bridge
+npx -y @scales-baby/nest-bridge
 ```
 
-The bridge fetches your wrapped key, unwraps it locally, and starts an MCP server on stdio. Point any MCP client at the same command.
+The bridge fetches your wrapped key, unwraps it locally, and starts an MCP server on stdio. Point any MCP client at the same command. (`-y` skips npm's install-confirm prompt so the launch can't hang.)
 
-In a real interactive terminal you can omit `NEST_PASSWORD` and `NEST_NON_INTERACTIVE`; the bridge then prompts `Nest encryption password:` with hidden input.
+When you run the bridge **manually** in a real interactive terminal, you can omit `NEST_PASSWORD` and `NEST_NON_INTERACTIVE`; the bridge then prompts `Nest encryption password:` with hidden input. This hidden prompt only works in a terminal. An **MCP-spawned** server has no TTY, so when an AI launches the bridge the password must come from config or your OS keychain (see below), not a prompt.
 
 ### Configuration (environment variables)
 
@@ -67,6 +67,11 @@ npm run pack:mcpb     # produces dist/scales-nest.mcpb
 
 Claude Desktop opens an install panel for "Nest by SCALES" and asks for your **Nest API key** and **Nest encryption password**. Both are marked sensitive, so Claude Desktop stores them in your OS keychain (macOS Keychain / Windows Credential Manager), not in a plain file. Leave **Nest URL** at its default and enable it.
 
+**Where your password lives (pick one):**
+
+- **Claude Desktop `.mcpb` (recommended):** stores your password in the OS keychain.
+- **`claude mcp add` (below):** stores it in your local Claude config (`~/.claude.json`), and the command line lands in your shell history. That is local-only, but prefer the `.mcpb` if you want it in the keychain.
+
 ## Per-AI config snippets
 
 **Claude Code (CLI):**
@@ -76,15 +81,17 @@ claude mcp add nest \
   --env NEST_API_KEY=nest_ab12cd34_... \
   --env NEST_PASSWORD=your-encryption-password \
   --env NEST_NON_INTERACTIVE=1 \
-  -- npx @scales-baby/nest-bridge
+  -- npx -y @scales-baby/nest-bridge
 ```
+
+After adding, reload so the tools appear: run `claude --continue` to resume the current session and load the MCP.
 
 **OpenAI / any stdio MCP client (JSON):**
 
 ```json
 {
   "command": "npx",
-  "args": ["@scales-baby/nest-bridge"],
+  "args": ["-y", "@scales-baby/nest-bridge"],
   "env": {
     "NEST_API_KEY": "nest_ab12cd34_...",
     "NEST_PASSWORD": "your-encryption-password",

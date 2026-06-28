@@ -88,7 +88,7 @@ export async function buildServer(ctx: BridgeContext): Promise<McpServer> {
   const { McpServer } = await loadSdk();
   const server: McpServer = new McpServer({
     name: "nest-bridge",
-    version: "1.0.2",
+    version: "1.0.3",
   });
 
   // Descriptions are registered ONCE at startup, before the background unlock
