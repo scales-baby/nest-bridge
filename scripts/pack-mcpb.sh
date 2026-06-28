@@ -37,7 +37,10 @@ echo "==> installing runtime deps into pack/"
 echo "==> validating manifest"
 npx --yes @anthropic-ai/mcpb@latest validate pack/manifest.json
 
-echo "==> packing dist/scales-nest.mcpb"
-npx --yes @anthropic-ai/mcpb@latest pack pack dist/scales-nest.mcpb
+echo "==> packing scales-nest.mcpb"
+# Emit the app bundle to repo root (NOT dist/), so it never lands in the
+# npm tarball. The .mcpb is downloaded separately from the Nest app; npx
+# users don't need it. Keeping it out of dist/ keeps the npm package small.
+npx --yes @anthropic-ai/mcpb@latest pack pack scales-nest.mcpb
 
-echo "==> done: $(pwd)/dist/scales-nest.mcpb"
+echo "==> done: $(pwd)/scales-nest.mcpb"

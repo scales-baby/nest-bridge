@@ -1,0 +1,9 @@
+# The .mcpb bundle is the desktop-app artifact (~4MB), built to repo root by
+# scripts/pack-mcpb.sh and downloaded separately from the Nest app. npx users
+# never need it — keep the npm tarball small. Belt-and-suspenders: the build
+# no longer writes it into dist/, but exclude it everywhere just in case.
+*.mcpb
+pack/
+.env
+.env.*
+*.local

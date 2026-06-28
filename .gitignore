@@ -11,3 +11,4 @@ pack/
 # os / editor
 .DS_Store
 *.log
+.npmrc
