@@ -1,0 +1,84 @@
+{
+  "manifest_version": "0.3",
+  "name": "scales-nest",
+  "display_name": "Nest by SCALES",
+  "version": "1.0.0",
+  "description": "Read and write your end-to-end-encrypted Nest through your own AI. Your encryption key is derived locally and never leaves your machine; Nest's servers only ever see ciphertext.",
+  "long_description": "Nest is your encrypted second brain (people, companies, tasks, events). This connector runs a small MCP server on your own machine. It fetches your password-wrapped key from Nest, unwraps it locally, then decrypts on read and encrypts on write right here. The Nest server only ever stores ciphertext and never receives your password, your key, or your plaintext. Mint a scoped API key in Nest (Settings then Connect your AI), paste it plus your encryption password below, and your AI can read and (with a full-control key) write your Nest data.",
+  "author": {
+    "name": "SCALES",
+    "url": "https://nest.scales.baby"
+  },
+  "homepage": "https://nest.scales.baby",
+  "icon": "icon.png",
+  "server": {
+    "type": "node",
+    "entry_point": "dist/index.js",
+    "mcp_config": {
+      "command": "node",
+      "args": ["${__dirname}/dist/index.js"],
+      "env": {
+        "NEST_API_KEY": "${user_config.nest_api_key}",
+        "NEST_PASSWORD": "${user_config.nest_password}",
+        "NEST_API_URL": "${user_config.nest_api_url}",
+        "NEST_NON_INTERACTIVE": "1"
+      }
+    }
+  },
+  "tools": [
+    { "name": "list_people", "description": "List people in your Nest, decrypted locally." },
+    { "name": "get_person", "description": "Get one person by id, decrypted locally." },
+    { "name": "search_people", "description": "Search people by decrypted name or notes." },
+    { "name": "create_person", "description": "Create a person; encrypted locally before it is stored." },
+    { "name": "update_person", "description": "Update a person; re-encrypted locally before it is stored." },
+    { "name": "list_companies", "description": "List companies in your Nest." },
+    { "name": "get_company", "description": "Get one company by id." },
+    { "name": "search_companies", "description": "Search companies." },
+    { "name": "create_company", "description": "Create a company." },
+    { "name": "update_company", "description": "Update a company." },
+    { "name": "list_tasks", "description": "List tasks in your Nest." },
+    { "name": "get_task", "description": "Get one task by id." },
+    { "name": "search_tasks", "description": "Search tasks." },
+    { "name": "create_task", "description": "Create a task." },
+    { "name": "update_task", "description": "Update a task." },
+    { "name": "complete_task", "description": "Mark a task complete." },
+    { "name": "list_events", "description": "List events in your Nest." },
+    { "name": "get_event", "description": "Get one event by id." },
+    { "name": "search_events", "description": "Search events." },
+    { "name": "create_event", "description": "Create an event." },
+    { "name": "update_event", "description": "Update an event." },
+    { "name": "get_digest", "description": "Get your follow-up digest (overdue and upcoming)." }
+  ],
+  "keywords": ["crm", "encrypted", "mcp", "nest", "scales", "second-brain"],
+  "license": "MIT",
+  "compatibility": {
+    "claude_desktop": ">=0.10.0",
+    "platforms": ["darwin", "win32", "linux"],
+    "runtimes": {
+      "node": ">=20.0.0"
+    }
+  },
+  "user_config": {
+    "nest_api_key": {
+      "type": "string",
+      "title": "Nest API key",
+      "description": "Your scoped key from Nest (Settings then Connect your AI). Read-only is enough to read; choose Full control to let your AI create and update records. Looks like nest_xxxx_...",
+      "required": true,
+      "sensitive": true
+    },
+    "nest_password": {
+      "type": "string",
+      "title": "Nest encryption password",
+      "description": "The password you set when you turned on encryption in Nest. Used locally to unlock your key. It is stored in your operating system keychain and is never sent to Nest. Leave blank only if your account is not encrypted.",
+      "required": true,
+      "sensitive": true
+    },
+    "nest_api_url": {
+      "type": "string",
+      "title": "Nest URL (advanced)",
+      "description": "Leave as the default unless you are testing against another Nest instance.",
+      "required": false,
+      "default": "https://nest.scales.baby"
+    }
+  }
+}

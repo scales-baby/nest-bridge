@@ -1,0 +1,56 @@
+{
+  "name": "@scales-baby/nest-bridge",
+  "version": "1.0.0",
+  "description": "Local MCP bridge for Nest. Read and write your end-to-end-encrypted Nest data through your own AI; the encryption key is derived locally from your password and never leaves your machine.",
+  "license": "MIT",
+  "author": "SCALES (https://nest.scales.baby)",
+  "homepage": "https://nest.scales.baby",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/scales-baby/nest-bridge.git"
+  },
+  "bugs": {
+    "url": "https://github.com/scales-baby/nest-bridge/issues"
+  },
+  "keywords": [
+    "crm",
+    "encrypted",
+    "e2e-encryption",
+    "mcp",
+    "model-context-protocol",
+    "nest",
+    "scales",
+    "second-brain",
+    "claude",
+    "ai"
+  ],
+  "type": "commonjs",
+  "bin": {
+    "nest-bridge": "./dist/index.js"
+  },
+  "main": "./dist/index.js",
+  "files": [
+    "dist/",
+    "manifest.json",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node ./dist/index.js",
+    "test": "node test/crypto-roundtrip.mjs",
+    "pack:mcpb": "bash scripts/pack-mcpb.sh"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.26.0",
+    "hash-wasm": "^4.12.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.5.3"
+  }
+}
