@@ -95,31 +95,89 @@ const task: ModelFieldSplit = {
 // free-text "notes" (and a couple of note-like fields) are the sensitive
 // content. We encrypt those and keep everything else cleartext so the event
 // calendar and route planning stay server-side.
+// COMPANY: encrypt the identifying label (name/city/category) alongside the
+// free-text notes. Only contactStatus + scheduling-ish metadata + tagHashes
+// stay cleartext so the server can count/filter without holding a key. City
+// grouping + name search are done CLIENT-SIDE on the decrypted records.
 const company: ModelFieldSplit = {
-  encrypted: ["notes", "payrollFriction"],
-  searchKeys: ["notes", "payrollFriction"],
-  clear: ["name", "city", "category", "contactStatus", "tags", "tagHashes"],
-  blankWith: { notes: "", payrollFriction: "" },
+  encrypted: ["notes", "payrollFriction", "name", "city", "category"],
+  searchKeys: ["notes", "payrollFriction", "name", "city"],
+  clear: ["contactStatus", "tags", "tagHashes"],
+  blankWith: { notes: "", payrollFriction: "", name: "", city: "", category: "" },
 };
 
+// MERCHANT: encrypt the identifying/operational content (name/city/zone/
+// address/type/paymentRails) alongside notes + contact/owner free text. Only
+// status enums (visitStatus/qrDeliveryStatus) + tagHashes stay cleartext so the
+// QR follow-up cron + counts keep working. City/zone grouping + name search are
+// CLIENT-SIDE on decrypted records.
 const merchant: ModelFieldSplit = {
-  encrypted: ["notes", "qrShippingContact", "ownerName", "contactPerson", "contactInfo"],
-  searchKeys: ["notes"],
-  clear: ["name", "city", "visitStatus", "qrDeliveryStatus", "tags", "tagHashes"],
+  encrypted: [
+    "notes",
+    "qrShippingContact",
+    "ownerName",
+    "contactPerson",
+    "contactInfo",
+    "name",
+    "city",
+    "zone",
+    "address",
+    "type",
+    "paymentRails",
+  ],
+  searchKeys: ["notes", "name", "city", "zone", "address"],
+  clear: ["visitStatus", "qrDeliveryStatus", "tags", "tagHashes"],
   blankWith: {
     notes: "",
     qrShippingContact: "",
     ownerName: "",
     contactPerson: "",
     contactInfo: "",
+    name: "",
+    city: "",
+    zone: "",
+    address: "",
+    type: "",
+    paymentRails: "[]",
   },
 };
 
+// EVENT: encrypt the identifying content (title/city/venue/type/url/tier/
+// costTier) and the people-bearing arrays (speakers/sponsors/expectedAttendees)
+// alongside notes + researchNotes. Only date + status + preOrPost + tagHashes
+// stay cleartext so the calendar cron/filters keep working. City grouping +
+// title search are CLIENT-SIDE on decrypted records.
 const event: ModelFieldSplit = {
-  encrypted: ["notes", "researchNotes"],
-  searchKeys: ["notes", "researchNotes"],
-  clear: ["title", "date", "city", "status", "tier", "tags", "tagHashes"],
-  blankWith: { notes: "", researchNotes: "" },
+  encrypted: [
+    "notes",
+    "researchNotes",
+    "title",
+    "city",
+    "venue",
+    "type",
+    "url",
+    "tier",
+    "costTier",
+    "speakers",
+    "sponsors",
+    "expectedAttendees",
+  ],
+  searchKeys: ["notes", "researchNotes", "title", "city", "venue"],
+  clear: ["date", "status", "preOrPost", "tags", "tagHashes"],
+  blankWith: {
+    notes: "",
+    researchNotes: "",
+    title: "",
+    city: "",
+    venue: "",
+    type: "",
+    url: "",
+    tier: "",
+    costTier: "",
+    speakers: "[]",
+    sponsors: "[]",
+    expectedAttendees: "[]",
+  },
 };
 
 const route: ModelFieldSplit = {

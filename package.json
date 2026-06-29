@@ -1,6 +1,6 @@
 {
   "name": "@scales-baby/nest-bridge",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "Local MCP bridge for Nest. Read and write your end-to-end-encrypted Nest data through your own AI; the encryption key is derived locally from your password and never leaves your machine.",
   "license": "MIT",
   "author": "SCALES (https://nest.scales.baby)",
